@@ -1,12 +1,10 @@
+use aws_config::BehaviorVersion;
+use aws_sdk_cloudwatchlogs::operation::filter_log_events::builders::FilterLogEventsFluentBuilder;
+use aws_sdk_cloudwatchlogs::Client;
 use chrono::Duration as Delta;
 use chrono::{DateTime, Local, NaiveDateTime, Utc};
 use console::Style;
 use log::info;
-use rusoto_core::{HttpClient, Region};
-use rusoto_credential::{AutoRefreshingProvider, ChainProvider, ProfileProvider, StaticProvider};
-use rusoto_logs::{
-    CloudWatchLogs, CloudWatchLogsClient, DescribeLogGroupsRequest, FilterLogEventsRequest,
-};
 use std::convert::From;
 use std::result::Result;
 use std::time::Duration;
@@ -27,34 +25,34 @@ fn calculate_start_time(from: DateTime<Local>, delta: Duration) -> Option<i64> {
 }
 
 pub fn create_filter_request(
+    cl: &Client,
     group: &String,
     start: Duration,
     filter: Option<String>,
     token: Option<String>,
-) -> FilterLogEventsRequest {
-    let mut req = FilterLogEventsRequest::default();
+) -> FilterLogEventsFluentBuilder {
     let delta = calculate_start_time(Local::now(), start);
-    req.start_time = delta;
-    req.next_token = token;
-    req.limit = Some(100);
-    req.filter_pattern = filter;
-    req.log_group_name = group.to_string();
-    return req;
+    cl.filter_log_events()
+    .set_start_time(delta)
+    .set_next_token(token)
+    .set_limit(Some(100))
+    .set_filter_pattern( filter)
+    .log_group_name(group.to_string())
 }
 
 pub fn create_filter_from_timestamp(
+    cl: &Client,
     group: &String,
     start: Option<i64>,
     filter: Option<String>,
     token: Option<String>,
-) -> FilterLogEventsRequest {
-    let mut req = FilterLogEventsRequest::default();
-    req.start_time = start;
-    req.next_token = token;
-    req.limit = Some(100);
-    req.filter_pattern = filter;
-    req.log_group_name = group.to_string();
-    return req;
+) -> FilterLogEventsFluentBuilder {
+    cl.filter_log_events()
+    .set_start_time ( start)
+    .set_next_token ( token)
+    .set_limit ( Some(100))
+    .set_filter_pattern ( filter)
+    .log_group_name ( group.to_string())
 }
 
 fn print_date(time: Option<i64>) -> String {
@@ -71,13 +69,14 @@ fn print_date(time: Option<i64>) -> String {
 }
 
 pub async fn fetch_logs(
-    client: &CloudWatchLogsClient,
-    req: FilterLogEventsRequest,
+    _client: &Client,
+    req: FilterLogEventsFluentBuilder,
     timeout: Duration,
     json_mode: bool,
 ) -> Result<AWSResponse, anyhow::Error> {
     info!("Sending log request {:?}", &req);
-    match tokio::time::timeout(timeout, client.filter_log_events(req.clone())).await? {
+    let start_time = req.get_start_time().clone();
+    match tokio::time::timeout(timeout, req.send()).await? {
         Ok(response) => {
             info!("Got response {:?}", &response);
             let mut events = response.events.unwrap();
@@ -101,7 +100,7 @@ pub async fn fetch_logs(
                 Some(x) => Ok(AWSResponse::Token(x)),
                 None => match last.flatten() {
                     Some(t) => Ok(AWSResponse::LastLog(Some(t))),
-                    None => Ok(AWSResponse::LastLog(req.start_time)),
+                    None => Ok(AWSResponse::LastLog(start_time)),
                 },
             }
         }
@@ -130,39 +129,20 @@ fn json_msg_with_timestamp(msg: &str, timestamp: Option<i64>) -> anyhow::Result<
     Ok(serde_json::to_string(&value)?)
 }
 
-pub fn client_with_profile(name: &str, region: Region, sso_session: bool) -> CloudWatchLogsClient {
-    if sso_session {
-        let cache_dir = dirs::home_dir().unwrap().join(".aws/cli/cache");
-        let json_file_path = find_first_json_file(&cache_dir).unwrap();
-        println!("Using first JSON file in cache: {:?}", json_file_path);
-
-        let file_content = fs::read_to_string(&json_file_path).unwrap();
-        let json: Value = serde_json::from_str(&file_content)
-            .expect("File is not a valid JSON");
-
-        let credentials = StaticProvider::new(
-            json.get("Credentials").unwrap().get("AccessKeyId").unwrap().as_str().unwrap().into(),
-            json.get("Credentials").unwrap().get("SecretAccessKey").unwrap().as_str().unwrap().into(),
-            Some(json.get("Credentials").unwrap().get("SessionToken").unwrap().to_string()),
-            None
-            //Some(json.get("Credentials").unwrap().get("Expiration").unwrap().to_string())
-        );
-        //println!("creds: {credentials:?}");
-        CloudWatchLogsClient::new_with(HttpClient::new().unwrap(), credentials, region)
-    } else {
-        let mut profile = ProfileProvider::new().unwrap();
-        profile.set_profile(name);
-        let chain = ChainProvider::with_profile_provider(profile);
-        let credentials = AutoRefreshingProvider::<ChainProvider>::new(chain).unwrap();
-        CloudWatchLogsClient::new_with(HttpClient::new().unwrap(), credentials, region)
-    }
+pub async fn client_with_profile(name: &str, region: aws_config::Region) -> Client {
+    let cfg = aws_config::defaults(BehaviorVersion::v2023_11_09())
+        .profile_name(name)
+        .region(region)
+        .load()
+        .await;
+    aws_sdk_cloudwatchlogs::Client::new(&cfg)
 }
 
-pub async fn list_log_groups(c: &CloudWatchLogsClient) -> Result<(), anyhow::Error> {
-    let mut req = DescribeLogGroupsRequest::default();
+pub async fn list_log_groups(c: &Client) -> Result<(), anyhow::Error> {
+    let mut req = c.describe_log_groups();
     loop {
         info!("Sending list log groups request {:?}", &req);
-        let resp = c.describe_log_groups(req).await?;
+        let resp = req.send().await?;
         match resp.log_groups {
             Some(x) => {
                 for group in x {
@@ -173,8 +153,8 @@ pub async fn list_log_groups(c: &CloudWatchLogsClient) -> Result<(), anyhow::Err
         }
         match resp.next_token {
             Some(x) => {
-                req = DescribeLogGroupsRequest::default();
-                req.next_token = Some(x)
+                req = c.describe_log_groups()
+                .next_token(x)
             }
             None => break,
         }

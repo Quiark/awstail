@@ -1,4 +1,5 @@
 use ctrlc;
+use aws_config::Region;
 mod funcs;
 use funcs::{
     client_with_profile, create_filter_from_timestamp, create_filter_request, fetch_logs,
@@ -7,7 +8,6 @@ use funcs::{
 use gumdrop::Options;
 use humantime::parse_duration;
 use log::info;
-use rusoto_core::Region;
 use std::str::FromStr;
 
 #[derive(Debug, Options, PartialEq)]
@@ -24,8 +24,6 @@ pub struct CliOptions {
     pub(crate) profile: Option<String>,
     #[options(command)]
     pub(crate) commands: Option<CommandOptions>,
-    #[options(help = "Use SSO session")]
-    pub sso_session: bool,
 }
 
 #[derive(Debug, Options, PartialEq)]
@@ -77,12 +75,10 @@ async fn main() -> Result<(), anyhow::Error> {
     ctrlc::set_handler(move || std::process::exit(0))
         .expect("Could not set Ctrl+C handler...bailing out");
     let matches: CliOptions = CliOptions::parse_args_default_or_exit();
-    let region = matches.region.map_or(Region::default(), |x| {
-        Region::from_str(&x).expect("Invalid region name")
-    });
+    let region = Region::new(matches.region.unwrap_or("ap-southeast-1".to_string()));
     env_logger::init();
     let profile = matches.profile.map_or("default".to_owned(), |x| x);
-    let client = client_with_profile(&profile, region, matches.sso_session);
+    let client = client_with_profile(&profile, region).await;
     if let Some(commands) = matches.commands {
         match commands {
             CommandOptions::List(_) => list_log_groups(&client).await?,
@@ -97,22 +93,22 @@ async fn main() -> Result<(), anyhow::Error> {
                 let sleep_for = g.watch.and_then(|x| parse_duration(&x).ok());
                 let filter = g.filter;
                 let mut token: Option<String> = None;
-                let mut req = create_filter_request(&group, mtime, filter.clone(), token);
+                let mut req = create_filter_request(&client, &group, mtime, filter.clone(), token);
                 loop {
                     match fetch_logs(&client, req, timeout, g.json_mode).await? {
                         AWSResponse::Token(x) => {
                             info!("Got a Token response");
                             token = Some(x);
-                            req = create_filter_request(&group, mtime, filter.clone(), token);
+                            req = create_filter_request(&client, &group, mtime, filter.clone(), token);
                         }
                         AWSResponse::LastLog(t) => match sleep_for {
                             Some(x) => {
                                 info!("Got a lastlog response");
                                 token = None;
                                 req =
-                                    create_filter_from_timestamp(&group, t, filter.clone(), token);
+                                    create_filter_from_timestamp(&client, &group, t, filter.clone(), token);
                                 info!("Waiting {:?} before requesting logs again...", x);
-                                tokio::time::delay_for(x).await
+                                tokio::time::sleep(x).await
                             }
                             None => break,
                         },
