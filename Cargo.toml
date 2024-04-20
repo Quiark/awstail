@@ -9,6 +9,7 @@ description = "Like `tail -f` for AWS Logs"
 readme = "README.md"
 categories = ["command-line-utilities"]
 license-file="LICENSE.md"
+
 [dependencies]
 rusoto_core = {version = "0.45.0", default_features = false, features=["rustls"]}
 rusoto_logs = {version = "0.45.0", default_features = false, features=["rustls"]}
@@ -24,6 +25,9 @@ futures = "0.3"
 tokio = { version = "0.2.22", features = ["macros"] }
 futures-util = "0.3.5"
 anyhow = "1.0"
+serde = "1.0.193"
+serde_json = "1.0.108"
+dirs = "5.0.1"
 [profile.release]
 opt-level = 'z'
 lto = true

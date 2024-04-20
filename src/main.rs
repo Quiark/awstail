@@ -24,6 +24,8 @@ pub struct CliOptions {
     pub(crate) profile: Option<String>,
     #[options(command)]
     pub(crate) commands: Option<CommandOptions>,
+    #[options(help = "Use SSO session")]
+    pub sso_session: bool,
 }
 
 #[derive(Debug, Options, PartialEq)]
@@ -66,6 +68,8 @@ pub struct LogsOptions {
     /// timeout after a given time period
     #[options(help = "timeout period")]
     pub(crate) timeout: Option<String>,
+    #[options(help = "JSON mode")]
+    pub json_mode: bool,
 }
 
 #[tokio::main]
@@ -78,7 +82,7 @@ async fn main() -> Result<(), anyhow::Error> {
     });
     env_logger::init();
     let profile = matches.profile.map_or("default".to_owned(), |x| x);
-    let client = client_with_profile(&profile, region);
+    let client = client_with_profile(&profile, region, matches.sso_session);
     if let Some(commands) = matches.commands {
         match commands {
             CommandOptions::List(_) => list_log_groups(&client).await?,
@@ -95,7 +99,7 @@ async fn main() -> Result<(), anyhow::Error> {
                 let mut token: Option<String> = None;
                 let mut req = create_filter_request(&group, mtime, filter.clone(), token);
                 loop {
-                    match fetch_logs(&client, req, timeout).await? {
+                    match fetch_logs(&client, req, timeout, g.json_mode).await? {
                         AWSResponse::Token(x) => {
                             info!("Got a Token response");
                             token = Some(x);
