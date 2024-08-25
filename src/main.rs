@@ -94,8 +94,9 @@ async fn main() -> Result<(), anyhow::Error> {
                 let filter = g.filter;
                 let mut token: Option<String> = None;
                 let mut req = create_filter_request(&client, &group, mtime, filter.clone(), token);
+                let mut last_time: Option<i64> = None;
                 loop {
-                    match fetch_logs(&client, req, timeout, g.json_mode).await? {
+                    match fetch_logs(&client, &mut last_time, req, timeout, g.json_mode).await? {
                         AWSResponse::Token(x) => {
                             info!("Got a Token response");
                             token = Some(x);
@@ -106,7 +107,7 @@ async fn main() -> Result<(), anyhow::Error> {
                                 info!("Got a lastlog response");
                                 token = None;
                                 req =
-                                    create_filter_from_timestamp(&client, &group, t, filter.clone(), token);
+                                    create_filter_from_timestamp(&client, &group, t.map(|i| i + 1), filter.clone(), token);
                                 info!("Waiting {:?} before requesting logs again...", x);
                                 tokio::time::sleep(x).await
                             }

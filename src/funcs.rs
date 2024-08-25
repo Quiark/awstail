@@ -70,6 +70,7 @@ fn print_date(time: Option<i64>) -> String {
 
 pub async fn fetch_logs(
     _client: &Client,
+    last_time: &mut Option<i64>,
     req: FilterLogEventsFluentBuilder,
     timeout: Duration,
     json_mode: bool,
@@ -95,37 +96,29 @@ pub async fn fetch_logs(
                     message,
                 );
             }
-            let last = events.last().map(|x| x.timestamp);
+            let last_evt_opt = events.last();
+            if let Some(last_evt) = last_evt_opt {
+                *last_time = last_evt.timestamp;
+            }
             match response.next_token {
                 Some(x) => Ok(AWSResponse::Token(x)),
-                None => match last.flatten() {
-                    Some(t) => Ok(AWSResponse::LastLog(Some(t))),
-                    None => Ok(AWSResponse::LastLog(start_time)),
-                },
+                _ => Ok(AWSResponse::LastLog(last_time.map_or(start_time, |i| Some(i))))
+
             }
         }
         Err(x) => return Err(anyhow::anyhow!(x)),
     }
 }
 
-fn find_first_json_file(dir: &Path) -> io::Result<PathBuf> {
-    let mut entries = fs::read_dir(dir)?
-        .filter_map(Result::ok)
-        .filter(|e| e.path().extension().map_or(false, |ext| ext == "json"));
-
-    if let Some(entry) = entries.next() {
-        Ok(entry.path())
-    } else {
-        Err(io::Error::new(io::ErrorKind::NotFound, format!("No JSON files found in the cache directory {dir:?}")))
-    }
-}
-
 fn json_msg_with_timestamp(msg: &str, timestamp: Option<i64>) -> anyhow::Result<String> {
     let mut value = serde_json::from_str::<Value>(msg)?;
-    let res = value.as_object_mut().ok_or(anyhow::anyhow!("no obj"))?.insert(
+    let map = value.as_object_mut().ok_or(anyhow::anyhow!("oh no obj"))?;
+    map.insert(
         "@timestamp".to_owned(),
         serde_json::to_value(print_date(timestamp))?,
     );
+    map.retain(|_, v| v.is_null() == false);
+
     Ok(serde_json::to_string(&value)?)
 }
 
