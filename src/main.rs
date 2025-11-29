@@ -22,6 +22,9 @@ pub struct CliOptions {
     /// profile
     #[options(help = "change default profile")]
     pub(crate) profile: Option<String>,
+    /// role ARN to assume
+    #[options(help = "IAM role ARN to assume for accessing logs")]
+    pub(crate) role: Option<String>,
     #[options(command)]
     pub(crate) commands: Option<CommandOptions>,
 }
@@ -78,7 +81,8 @@ async fn main() -> Result<(), anyhow::Error> {
     let region = Region::new(matches.region.unwrap_or("ap-southeast-1".to_string()));
     env_logger::init();
     let profile = matches.profile.map_or("default".to_owned(), |x| x);
-    let client = client_with_profile(&profile, region).await;
+    let role = matches.role;
+    let client = client_with_profile(&profile, region, role).await;
     if let Some(commands) = matches.commands {
         match commands {
             CommandOptions::List(_) => list_log_groups(&client).await?,

@@ -1,6 +1,7 @@
 use aws_config::BehaviorVersion;
 use aws_sdk_cloudwatchlogs::operation::filter_log_events::builders::FilterLogEventsFluentBuilder;
 use aws_sdk_cloudwatchlogs::Client;
+use aws_config::sts::AssumeRoleProvider;
 use chrono::Duration as Delta;
 use chrono::{DateTime, Local, NaiveDateTime, Utc};
 use console::Style;
@@ -122,12 +123,27 @@ fn json_msg_with_timestamp(msg: &str, timestamp: Option<i64>) -> anyhow::Result<
     Ok(serde_json::to_string(&value)?)
 }
 
-pub async fn client_with_profile(name: &str, region: aws_config::Region) -> Client {
-    let cfg = aws_config::defaults(BehaviorVersion::v2023_11_09())
+pub async fn client_with_profile(name: &str, region: aws_config::Region, role_arn: Option<String>) -> Client {
+    let mut config_loader = aws_config::defaults(BehaviorVersion::v2023_11_09())
         .profile_name(name)
-        .region(region)
-        .load()
-        .await;
+        .region(region);
+    
+    if let Some(role) = role_arn {
+        let sts_config = aws_config::defaults(BehaviorVersion::v2023_11_09())
+            .profile_name(name)
+            .region(region.clone())
+            .load()
+            .await;
+        let sts_client = aws_sdk_sts::Client::new(&sts_config);
+        
+        let provider = aws_config::sts::AssumeRoleProvider::builder(role)
+            .session_name("awstail-session")
+            .build(sts_client);
+        
+        config_loader = config_loader.credentials_provider(provider);
+    }
+    
+    let cfg = config_loader.load().await;
     aws_sdk_cloudwatchlogs::Client::new(&cfg)
 }
 
