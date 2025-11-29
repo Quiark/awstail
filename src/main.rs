@@ -8,7 +8,6 @@ use funcs::{
 use gumdrop::Options;
 use humantime::parse_duration;
 use log::info;
-use std::str::FromStr;
 
 #[derive(Debug, Options, PartialEq)]
 /// Tail the cloud

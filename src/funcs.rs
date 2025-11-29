@@ -1,7 +1,6 @@
 use aws_config::BehaviorVersion;
 use aws_sdk_cloudwatchlogs::operation::filter_log_events::builders::FilterLogEventsFluentBuilder;
 use aws_sdk_cloudwatchlogs::Client;
-use aws_config::sts::AssumeRoleProvider;
 use chrono::Duration as Delta;
 use chrono::{DateTime, Local, NaiveDateTime, Utc};
 use console::Style;
@@ -10,7 +9,6 @@ use std::convert::From;
 use std::result::Result;
 use std::time::Duration;
 use serde_json::Value;
-use std::{fs, env, io, path::{PathBuf, Path}};
 
 pub enum AWSResponse {
     Token(String),
@@ -138,7 +136,8 @@ pub async fn client_with_profile(name: &str, region: aws_config::Region, role_ar
         
         let provider = aws_config::sts::AssumeRoleProvider::builder(role)
             .session_name("awstail-session")
-            .build(sts_client);
+            .build_from_provider(sts_client)
+            .await;
         
         config_loader = config_loader.credentials_provider(provider);
     }
