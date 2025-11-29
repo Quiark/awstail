@@ -121,25 +121,29 @@ fn json_msg_with_timestamp(msg: &str, timestamp: Option<i64>) -> anyhow::Result<
     Ok(serde_json::to_string(&value)?)
 }
 
-pub async fn client_with_profile(name: &str, region: aws_config::Region, role_arn: Option<String>) -> Client {
-    let mut config_loader = aws_config::defaults(BehaviorVersion::v2023_11_09())
-        .profile_name(name)
-        .region(region.clone());
+pub async fn client_with_profile(name: &Option<String>, region: aws_config::Region, role_arn: Option<String>) -> Client {
+    let mk_cfg = || {
+        let mut config_loader = aws_config::defaults(BehaviorVersion::v2023_11_09())
+            .region(region.clone());
+        if let Some(prof) = name.as_ref() {
+            config_loader = config_loader.profile_name(prof);
+        }
+        config_loader
+    };
     
+    let mut config_loader = mk_cfg();
     if let Some(role) = role_arn {
         // Load base credentials from the profile
-        let base_config = aws_config::defaults(BehaviorVersion::v2023_11_09())
-            .profile_name(name)
-            .region(region.clone())
+        let base_config = mk_cfg()
             .load()
             .await;
         
         let base_provider = base_config.credentials_provider().unwrap();
-        let sts_client = aws_sdk_sts::Client::new(&base_config);
+        //println!("{name} creds provider: {:#?}", base_provider);
         
         let provider = aws_config::sts::AssumeRoleProvider::builder(role)
             .session_name("awstail")
-            .build_from_provider(base_provider, sts_client)
+            .build_from_provider(base_provider)
             .await;
         
         config_loader = config_loader.credentials_provider(provider);

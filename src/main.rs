@@ -79,9 +79,8 @@ async fn main() -> Result<(), anyhow::Error> {
     let matches: CliOptions = CliOptions::parse_args_default_or_exit();
     let region = Region::new(matches.region.unwrap_or("ap-southeast-1".to_string()));
     env_logger::init();
-    let profile = matches.profile.map_or("default".to_owned(), |x| x);
     let role = matches.role;
-    let client = client_with_profile(&profile, region, role).await;
+    let client = client_with_profile(&matches.profile, region, role).await;
     if let Some(commands) = matches.commands {
         match commands {
             CommandOptions::List(_) => list_log_groups(&client).await?,
