@@ -135,7 +135,7 @@ pub async fn client_with_profile(name: &str, region: aws_config::Region, role_ar
         let sts_client = aws_sdk_sts::Client::new(&sts_config);
         
         let provider = aws_config::sts::AssumeRoleProvider::builder(role)
-            .session_name("awstail-session")
+            .session_name("awstail")
             .build_from_provider(sts_client)
             .await;
         
