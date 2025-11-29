@@ -124,19 +124,22 @@ fn json_msg_with_timestamp(msg: &str, timestamp: Option<i64>) -> anyhow::Result<
 pub async fn client_with_profile(name: &str, region: aws_config::Region, role_arn: Option<String>) -> Client {
     let mut config_loader = aws_config::defaults(BehaviorVersion::v2023_11_09())
         .profile_name(name)
-        .region(region);
+        .region(region.clone());
     
     if let Some(role) = role_arn {
-        let sts_config = aws_config::defaults(BehaviorVersion::v2023_11_09())
+        // Load base credentials from the profile
+        let base_config = aws_config::defaults(BehaviorVersion::v2023_11_09())
             .profile_name(name)
             .region(region.clone())
             .load()
             .await;
-        let sts_client = aws_sdk_sts::Client::new(&sts_config);
+        
+        let base_provider = base_config.credentials_provider().unwrap();
+        let sts_client = aws_sdk_sts::Client::new(&base_config);
         
         let provider = aws_config::sts::AssumeRoleProvider::builder(role)
             .session_name("awstail")
-            .build_from_provider(sts_client)
+            .build_from_provider(base_provider, sts_client)
             .await;
         
         config_loader = config_loader.credentials_provider(provider);
